@@ -1,0 +1,101 @@
+version: '3'
+services:
+  mysql-master:
+    build:
+      context: ./mysql
+      dockerfile: master.Dockerfile
+    command: --default-authentication-plugin=mysql_native_password
+    container_name: project-docker_mysql-master
+    volumes:
+      - ./mysql/seeding/mysql/master:/seeding/mysql
+      - ./mysql/seeding/project:/seeding/project
+      - ./mysql/seeding.sh:/docker-entrypoint-initdb.d/seeding.sh
+    environment:
+      - TZ=Asia/Seoul
+      - MYSQL_ROOT_PASSWORD=1234
+      - MYSQL_DATABASE=project
+      - MYSQL_USER=test
+      - MYSQL_PASSWORD=test1234
+    ports:
+      - "33061:3306"
+    networks:
+      - backend
+
+  mysql-slave:
+    build:
+      context: ./mysql
+      dockerfile: slave.Dockerfile
+    command: --default-authentication-plugin=mysql_native_password
+    container_name: project-docker_mysql-slave
+    volumes:
+      - ./mysql/seeding/mysql/slave:/seeding/mysql
+      - ./mysql/seeding/project:/seeding/project
+      - ./mysql/seeding.sh:/docker-entrypoint-initdb.d/seeding.sh
+    depends_on:
+      - mysql-master
+    environment:
+      - TZ=Asia/Seoul
+      - MYSQL_ROOT_PASSWORD=1234
+      - MYSQL_DATABASE=project
+      - MYSQL_USER=test
+      - MYSQL_PASSWORD=test1234
+    ports:
+      - "33071:3306"
+    networks:
+      - backend
+
+  redis-master:
+    image: redis:5.0.8
+    command: redis-server --requirepass q8m2zEMbqaEy --port 6379
+    container_name: project-docker-redis-master
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+  redis-slave:
+    image: redis:5.0.8
+    command: redis-server --requirepass q8m2zEMbqaEy --slaveof redis-master 6379 --masterauth q8m2zEMbqaEy
+    container_name: project-docker-redis-slave
+    ports:
+      - "6479:6379"
+    depends_on:
+      - redis-master
+    networks:
+      - backend
+
+  php-fpm:
+    container_name: project-php-fpm
+    build:
+      context: ./web/php-fpm
+      dockerfile: Dockerfile
+    volumes:
+      - ./web/doc_root/www.codeigniter.co:/var/www/www.codeigniter.co
+      - ./web/doc_root/www.laravel.co:/var/www/www.laravel.co
+      - ./tmp/grinds:/tmp/grinds
+    networks:
+      - backend
+    environment:
+      DEBUG: 1
+    working_dir: /var/www
+
+  nginx:
+      container_name: project-nginx
+      build:
+        context: ./web/nginx
+        dockerfile: Dockerfile
+      depends_on:
+          - mysql-master
+          - mysql-slave
+          - redis-master
+          - redis-slave
+          - php-fpm
+      ports:
+          - "8080:80"
+      volumes_from:
+          - php-fpm
+      networks:
+          - backend
+networks:
+  backend:
+    name: project-backend

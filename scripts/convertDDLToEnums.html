@@ -1,0 +1,175 @@
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta charSet="utf-8">
+  <title></title>
+</head>
+<body>
+<h1>
+  create to enums
+</h1>
+<div>
+  <button id="download">download</button>
+  <br/>
+  <div>
+    SQL DDL Query 문에 COMMNET를 기준으로 enums를 만드는 페이지 입니다.<br/>
+    예시로는 "`option_type` TINYINT NOT NULL DEFAULT 1 COMMENT '옵션유형(1:기본,2:일반,3:조합,4:묶음,9:추가)'," 이런 구문이어야합니다.<br/>
+    괄호안에 , 과 : 을 모두 포함하고 있어야합니다.<br/>
+    ,은 구분자<br/>
+    1(key):기본(value)
+  </div>
+</div>
+<br/>
+input : <textarea id="input" style="width: 500px; height: 400px"></textarea>
+<br/>
+<script>
+let fileName = '';
+
+let convertJpaEntity = str => {
+  let convertCamelCase = str => str.replace(/_([a-z])/g, g => {
+    return g[1].toUpperCase();
+  });
+  let convertPascalCase = str => {
+    let camel = convertCamelCase(str);
+    return camel[0].toUpperCase() + camel.substr(1);
+  };
+
+  const TYPE_STRING = 1;
+  const TYPE_INT = 2;
+  let returnStr = '';
+  let trimStr = str.trim();
+  let lowerCaseStr = trimStr.toLowerCase();
+  let columnName = trimStr.match(/[a-z_0-9]+/)[0];
+  let className = convertPascalCase(columnName);
+  let commentStr = '';
+  let commentNameStr = '';
+  let commentKeyType = 0;
+
+  fileName = className;
+
+  // comment 문자열 치환
+  let commnetAfterStr = '';
+  let commentRegex = new RegExp("([\\']).+?\\1"); // '표 찾는 정규식
+  let commentNameRegex = new RegExp("[a-z_0-9ㄱ-ㅎ|ㅏ-ㅣ가-힣 ]+"); // 문자열 찾는 정규식
+  let commentKeyValRegex = new RegExp("\\((.*?)\\)"); // () 찾는 정규식
+
+  if (lowerCaseStr.search('comment') > 0){
+    commnetAfterStr = trimStr.slice(lowerCaseStr.search('comment'));
+  }
+
+  if (commentRegex.test(commnetAfterStr) === false || commentKeyValRegex.test(commnetAfterStr) === false){ // 강제 종료
+    return '';
+  }
+
+  let commentRegexExists = commentRegex.exec(commnetAfterStr);
+  if (commentRegexExists !== null){
+    commentStr = commentRegexExists[0].replace(/\'/gi, "");
+  }
+
+  // comment name 문자열 치환
+  let commentNameRegexExists = commentNameRegex.exec(commentStr);
+  if (commentNameRegexExists !== null){
+    commentNameStr = commentNameRegexExists[0];
+  }
+
+  // comment key value 문자열 치환
+  let commentKeyValRegexExists = commentKeyValRegex.exec(commentStr.replace(/(\s*)/g, ""));
+  let commentKeyValStr = commentKeyValRegexExists[0].replace(/\(/gi, "").replace(/\)/gi, "");
+  if (commentKeyValStr.search(/,/i) < 0 && commentKeyValStr.search(/:/i) < 0){ // 강제 종료
+    return '';
+  }
+
+  let keyArray = [];
+  let valueArray = [];
+
+  // comment key type 확인
+  commentKeyValStr.split(',').forEach(function (items){
+    let item = items.split(':');
+    if (isNaN(Number(item[0])) === true){
+      commentKeyType = TYPE_STRING;
+    }else {
+      commentKeyType = TYPE_INT;
+    }
+    keyArray.push(item[0]);
+    valueArray.push(item[1]);
+  });
+
+  let textCodeLong = (commentKeyType === TYPE_INT) ? 'Int' : 'String';
+
+  returnStr += 'package com.ksb.study.common.enums\n\n';
+  returnStr += `import com.ksb.study.common.dtos.${textCodeLong}CodeInterface\n`;
+  returnStr += 'import com.ksb.study.core.ProjectConstants\n\n';
+
+  returnStr += `@ProjectConstants("${commentNameStr}")\n`;
+  returnStr += `enum class ${className}(override val code: ${textCodeLong}, override val description: String) : ${textCodeLong}CodeInterface {\n`;
+
+  valueArray.forEach(function (val,key){
+    let comma = (key === valueArray.length-1) ? ';': ',';
+    returnStr += `    ${val}(Constants.${val}, Constants.${val}_DESCRIPTION)${comma}\n`;
+  })
+
+  returnStr += '\n';
+  if (commentKeyType === TYPE_STRING){
+    returnStr += `    companion object {\n` +
+            `        fun from(code: ${textCodeLong}): ${className} =\n` +
+            `                values().find { it.code == code } ?: throw IllegalArgumentException(code)\n` +
+            `    }\n\n`;
+
+  }else if(commentKeyType === TYPE_INT){
+    returnStr += `    companion object {\n` +
+            `        fun from(code: ${textCodeLong}): ${className} =\n` +
+            `                values().find { it.code == code } ?: throw IllegalArgumentException(code.toString())\n` +
+            `    }\n\n`;
+  }
+
+  returnStr += `    object Constants {\n` ;
+
+  keyArray.forEach(function (val,key){
+    let valStr = (commentKeyType === TYPE_STRING) ? `"${val}"` : val;
+    returnStr += `        const val ${valueArray[key]} = ${valStr}\n`;
+  })
+
+  returnStr += '\n';
+
+  valueArray.forEach(function (val){
+    returnStr += `        const val ${val}_DESCRIPTION = "${val}"\n`;
+  })
+
+  returnStr += `    }\n` ;
+
+  returnStr += '}';
+
+  return returnStr
+};
+
+document.getElementById('download').addEventListener('click', (e) => {
+  try {
+    let str = document.getElementById('input').value;
+
+    str.split('\n').forEach((line, idx) => {
+      let trimStr = line.trim();
+
+      if (trimStr.toLowerCase().search(/` (varchar|char|bigint|int|tinyint|smallint|decimal|date|datetime)/i) > 0 && trimStr.toLowerCase().search(/` ()/i) > 0) { // 컬럼
+        let content = convertJpaEntity(trimStr);
+        if(content !== ''){
+          if (fileName === '') {
+            alert("파일 변환 실패");
+            return;
+          }
+
+          let link = document.createElement('a');
+          link.download = `${fileName}.kt`;
+          let blob = new Blob([content], {type: 'text/plain'});
+          link.href = window.URL.createObjectURL(blob);
+          link.click();
+        }
+      }
+    });
+  } catch (error) {
+    console.error(error);
+  }
+});
+
+</script>
+</body>
+</html>
